@@ -32,3 +32,33 @@ if st.button("Send") and question:
             st.write(f"- {source}")
     else:
         st.error("Chat request failed. Check backend logs.")
+
+st.subheader("3) Ticket Intelligence")
+ticket_message = st.text_area("Customer message", height=150)
+customer_tier = st.selectbox("Customer tier", options=["standard", "premium", "enterprise"], index=0)
+previous_failed_answers = st.number_input("Previous failed answers", min_value=0, step=1, value=0)
+rag_confidence = st.slider("RAG confidence", min_value=0.0, max_value=1.0, value=0.85, step=0.01)
+
+if st.button("Analyze Ticket"):
+    if not ticket_message.strip():
+        st.warning("Please provide a customer message before analysis.")
+    else:
+        payload = {
+            "message": ticket_message,
+            "customer_tier": customer_tier,
+            "previous_failed_answers": int(previous_failed_answers),
+            "rag_confidence": float(rag_confidence),
+        }
+        response = requests.post(f"{API_BASE_URL}/analyze-ticket", json=payload, timeout=30)
+        if response.ok:
+            data = response.json()
+            st.markdown("### Analysis Result")
+            st.write(f"**Category:** {data.get('category')}")
+            st.write(f"**Sentiment:** {data.get('sentiment')}")
+            st.write(f"**Urgency:** {data.get('urgency')}")
+            st.write(f"**Escalate:** {data.get('escalate')}")
+            st.write(f"**Escalation Reason:** {data.get('escalation_reason')}")
+            st.write(f"**Recommended Action:** {data.get('recommended_action')}")
+            st.write(f"**Confidence:** {data.get('confidence')}")
+        else:
+            st.error(f"Ticket analysis failed: {response.text}")
