@@ -1,0 +1,4 @@
+ticket_id,customer_name,issue_category,priority,description,status
+1001,Alex Carter,Billing,High,Customer reports duplicate monthly charges,Open
+1002,Maya Singh,Technical,Medium,Unable to reset password through portal,In Progress
+1003,Jordan Lee,Delivery,Low,Package arrived one day late,Resolved
