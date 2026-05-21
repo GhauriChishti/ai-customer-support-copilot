@@ -1,7 +1,14 @@
 from fastapi import FastAPI, File, UploadFile
 
+from backend.app.agents.support_intelligence import analyze_ticket
 from backend.app.config import settings
-from backend.app.models.schemas import ChatRequest, ChatResponse, HealthResponse
+from backend.app.models.schemas import (
+    ChatRequest,
+    ChatResponse,
+    HealthResponse,
+    TicketAnalysisRequest,
+    TicketAnalysisResponse,
+)
 from backend.app.rag.rag_chain import generate_answer
 from backend.app.rag.vector_store import VectorStoreClient
 from backend.app.services.file_service import save_uploaded_file
@@ -25,3 +32,8 @@ async def upload_file(file: UploadFile = File(...)) -> dict:
 def chat(request: ChatRequest) -> ChatResponse:
     result = generate_answer(request.question, vector_store)
     return ChatResponse(answer=result["answer"], sources=result.get("sources", []))
+
+
+@app.post("/analyze-ticket", response_model=TicketAnalysisResponse)
+def analyze_support_ticket(request: TicketAnalysisRequest) -> TicketAnalysisResponse:
+    return analyze_ticket(request)
