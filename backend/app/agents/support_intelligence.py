@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
@@ -35,6 +36,8 @@ CATEGORIES = [
 
 SENTIMENTS = ["Positive", "Neutral", "Negative", "Angry"]
 URGENCY_LEVELS = ["Low", "Medium", "High", "Critical"]
+
+logger = logging.getLogger(__name__)
 
 
 def analyze_ticket(request: TicketAnalysisRequest) -> TicketAnalysisResponse:
@@ -80,24 +83,24 @@ def _analyze_ticket_with_rules(request: TicketAnalysisRequest) -> TicketAnalysis
 
 
 def _extract_rule_signals(request: TicketAnalysisRequest) -> RuleSignals:
-    message = request.message.lower()
+    message = request.message.lower().strip()
 
-    is_refund = _contains_any(message, ["refund", "money back", "chargeback", "return my money"])
-    is_billing = _contains_any(message, ["invoice", "charged", "billing", "payment", "subscription", "price"])
-    is_technical = _contains_any(message, ["bug", "error", "issue", "not working", "crash", "login", "reset password"])
-    is_delivery = _contains_any(message, ["delivery", "shipping", "shipment", "tracking", "arrive", "late package"])
-    is_product_question = _contains_any(message, ["how does", "feature", "can i", "does it", "what is", "integration"])
-    is_complaint = _contains_any(message, ["complaint", "unacceptable", "disappointed", "terrible", "frustrated", "angry"])
-    legal_threat = _contains_any(message, ["lawsuit", "legal", "attorney", "sue", "consumer protection", "report you"])
+    is_refund = _contains_any(message, ["refund", "money back", "chargeback", "cancel payment"])
+    is_billing = _contains_any(message, ["invoice", "charged", "payment", "billing"])
+    is_technical = _contains_any(message, ["crash", "error", "bug", "not working", "failed", "upload"])
+    is_delivery = _contains_any(message, ["delivery", "shipment", "tracking", "package"])
+    is_product_question = _contains_any(message, ["support", "feature", "integration", "available", "does your platform"])
+    is_complaint = _contains_any(message, ["complaint", "disappointed", "poor service"])
+    legal_threat = _contains_any(message, ["lawyer", "legal", "lawsuit", "sue", "report this company"])
 
     if is_refund:
         category = "Refund"
-    elif is_billing:
-        category = "Billing"
     elif is_technical:
         category = "Technical Support"
     elif is_delivery:
         category = "Delivery"
+    elif is_billing:
+        category = "Billing"
     elif is_complaint:
         category = "Complaint"
     elif is_product_question:
@@ -105,8 +108,8 @@ def _extract_rule_signals(request: TicketAnalysisRequest) -> RuleSignals:
     else:
         category = "General Query"
 
-    angry_markers = ["angry", "furious", "outrage", "ridiculous", "unacceptable", "fed up", "terrible service"]
-    negative_markers = ["frustrated", "disappointed", "bad", "not happy", "upset"]
+    angry_markers = ["angry", "frustrated", "furious", "terrible", "worst", "unacceptable"]
+    negative_markers = ["disappointed", "poor service", "upset", "not happy"]
     positive_markers = ["thanks", "great", "love", "awesome", "helpful"]
 
     if _contains_any(message, angry_markers):
@@ -121,9 +124,9 @@ def _extract_rule_signals(request: TicketAnalysisRequest) -> RuleSignals:
     urgency = "Low"
     if _contains_any(message, ["asap", "urgent", "immediately", "today", "right now"]):
         urgency = "High"
-    if legal_threat or _contains_any(message, ["cancel contract", "security breach", "data loss"]):
+    if legal_threat:
         urgency = "Critical"
-    elif request.previous_failed_answers > 0 or sentiment in {"Angry", "Negative"}:
+    elif sentiment == "Angry" or request.previous_failed_answers >= 2:
         urgency = "Medium" if urgency == "Low" else urgency
 
     escalation_reasons: list[str] = []
@@ -133,29 +136,36 @@ def _extract_rule_signals(request: TicketAnalysisRequest) -> RuleSignals:
         escalation_reasons.append("refund request")
     if legal_threat:
         escalation_reasons.append("legal threat")
-    if request.previous_failed_answers > 0:
-        escalation_reasons.append("repeated failed answer")
-    if request.rag_confidence < 0.6:
-        escalation_reasons.append("low confidence answer")
-    if request.customer_tier in {"premium", "enterprise"} and urgency in {"High", "Critical"}:
-        escalation_reasons.append("high-value customer issue")
+    if request.previous_failed_answers >= 2:
+        escalation_reasons.append("multiple failed answers")
+    if request.rag_confidence < 0.5:
+        escalation_reasons.append("low rag confidence")
+    if request.customer_tier == "enterprise" and request.rag_confidence < 0.75:
+        escalation_reasons.append("enterprise low rag confidence")
 
-    escalate = len(escalation_reasons) > 0
+    escalate = bool(escalation_reasons)
 
     if escalate:
         recommended_action = "Escalate to a human specialist with full ticket context and customer history."
         escalation_reason = ", ".join(escalation_reasons)
     else:
         recommended_action = "Respond with standard support workflow and monitor follow-up."
-        escalation_reason = "none"
+        escalation_reason = "no escalation triggers"
 
-    confidence = 0.9
-    if request.rag_confidence < 0.6:
-        confidence = 0.65
+    confidence = max(0.5, min(0.98, request.rag_confidence))
     if category == "General Query":
         confidence = min(confidence, 0.75)
     if legal_threat:
         confidence = min(confidence, 0.7)
+
+    logger.debug(
+        "Ticket analysis fallback: category=%s sentiment=%s urgency=%s escalate=%s reasons=%s",
+        category,
+        sentiment,
+        urgency,
+        escalate,
+        escalation_reason,
+    )
 
     return RuleSignals(
         category=category,
@@ -169,4 +179,4 @@ def _extract_rule_signals(request: TicketAnalysisRequest) -> RuleSignals:
 
 
 def _contains_any(text: str, patterns: list[str]) -> bool:
-    return any(re.search(rf"\\b{re.escape(pattern)}\\b", text) for pattern in patterns)
+    return any(re.search(rf"\b{re.escape(pattern)}\b", text) for pattern in patterns)
